@@ -3,6 +3,7 @@
 -export([process/1]).
 
 -include("tunnerl.hrl").
+-export([remote_do_connect_/6]).
 
 -define(VERSION, 16#05).
 -define(RSV, 16#00).
@@ -121,6 +122,24 @@ doCmd(?CMD_CONNECT, ATYP, #state{transport = Transport,
                 destination_port    => Port},
     {BAddr, BPort} = get_binary_ip_port(ISocket),
     case (catch Handler:handle_command(Request)) of
+				{rpc, Node} when is_atom(Node) ->
+					{Pid,MRef} = spawn_opt(Node, ?MODULE, remote_do_connect_, [self(),Addr,Port,BAddr,BPort,State#state{ username = User}], [monitor]),
+					Transport:controlling_process(ISocket, Pid),
+					Pid ! {self(), ?MODULE},
+					receive
+						{?MODULE, remote_do_connect_, {ok, State2 = #state{ outgoing_socket = OSocket } }} ->
+							Transport:controlling_process(OSocket, self()),
+							Transport:controlling_process(ISocket, self()),
+							(catch erlang:demonitor(MRef)),
+							Pid ! {self(), ?MODULE},
+							{ok, State2};
+
+						{'DOWN', MRef, process, Pid, _Reason} ->
+            	ok = Transport:send(ISocket, <<?VERSION, ?REP_SERVER_ERROR, ?RSV, ?IPV4, BAddr/binary, BPort:16>>),
+	            error(server_error)
+					end;
+
+
         accept ->
             do_connect(Addr, Port, BAddr, BPort, State#state{username = User});
         reject->
@@ -191,3 +210,10 @@ parse_addr_port(?IPV6, <<Addr:16/binary, Port:16>>) ->
     {{A,B,C,D,E,F,G,H}, Port};
 parse_addr_port(?DOMAIN, <<Len, Addr:Len/binary, Port:16>>) ->
     {binary_to_list(Addr), Port}.
+
+
+remote_do_connect_(Parent,Addr,Port,BAddr,BPort,State) ->
+	receive {Parent, ?MODULE, ok} -> ok end,
+	Parent ! {?MODULE, remote_do_connect_, do_connect(Addr,Port,BAddr,BPort,State)},
+	receive {Parent, ?MODULE} -> ok end.
+	
