@@ -3,7 +3,7 @@
 -behavior(ranch_protocol).
 
 %% ranch_protocol callbacks
--export([start_link/3,
+-export([start_link/3, start_link/4,
          init/3]).
 
 -export([connect/3,
@@ -11,6 +11,9 @@
 -export([loop/1]).
 
 -include("tunnerl.hrl").
+
+start_link(Ref, _Socket, Transport, Opts) ->
+  start_link(Ref, Transport, Opts).
 
 start_link(Ref, Transport, Opts) ->
     Pid = spawn_link(?MODULE, init, [Ref, Transport, Opts]),
